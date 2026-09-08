@@ -27,6 +27,24 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      # 'shipit protect' stores a write deploy key here when GitHub will not let the Actions app bypass the ruleset.
+      - name: Use the shipit deploy key when one is configured
+        env:
+          DEPLOY_KEY: ${{ secrets.SHIPIT_DEPLOY_KEY }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ]; then
+            echo "no SHIPIT_DEPLOY_KEY secret; pushing with the workflow token"
+            exit 0
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/shipit_deploy_key
+          chmod 600 ~/.ssh/shipit_deploy_key
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          git config core.sshCommand "ssh -i ~/.ssh/shipit_deploy_key -o IdentitiesOnly=yes"
+          git remote set-url origin "git@github.com:$REPO.git"
+          echo "pushing over SSH with the shipit deploy key"
+
       - name: Merge main into dev
         id: merge
         env:
@@ -47,7 +65,12 @@ jobs:
             exit 0
           fi
           git checkout "$DEV"
-          if git merge "origin/$MAIN" --no-ff -m "chore: back-merge $MAIN into $DEV [shipit]"; then
+          # Right after a release nothing new is on $DEV, so it can simply move to $MAIN's tip: no extra merge commit.
+          if git merge --ff-only "origin/$MAIN" 2>/dev/null; then
+            git push origin "$DEV"
+            echo "fast-forwarded $DEV to $MAIN"
+            echo "result=fast-forwarded" >> "$GITHUB_OUTPUT"
+          elif git merge "origin/$MAIN" --no-ff -m "chore: back-merge $MAIN into $DEV [shipit]"; then
             git push origin "$DEV"
             echo "result=merged" >> "$GITHUB_OUTPUT"
           else
