@@ -1,0 +1,19 @@
+{
+  "main": "main",
+  "dev": "dev",
+  "ticketPrefix": "CU",
+  "types": [
+    "feat",
+    "fix",
+    "docs",
+    "style",
+    "refactor",
+    "perf",
+    "test",
+    "chore",
+    "ci",
+    "build"
+  ],
+  "approvals": 1,
+  "headerMaxLength": 100
+}

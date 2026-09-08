@@ -1,0 +1,79 @@
+# shipit workflows v1 - managed by shipit. Regenerate with `shipit init`; manual edits are overwritten.
+name: shipit rules
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches: [main, dev]
+
+jobs:
+  rules:
+    name: rules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR source and target
+        env:
+          SOURCE: ${{ github.head_ref }}
+          TARGET: ${{ github.base_ref }}
+          MAIN: main
+          DEV: dev
+        run: |
+          echo "PR: $SOURCE -> $TARGET"
+          if [ "$TARGET" = "$DEV" ]; then
+            case "$SOURCE" in
+              feature/*|hotfix/*) echo "ok" ;;
+              *) echo "::error::Only feature/* and hotfix/* branches may open PRs to $DEV (got '$SOURCE'). Create one with: shipit feature <id> <desc>"; exit 1 ;;
+            esac
+          elif [ "$TARGET" = "$MAIN" ]; then
+            if [ "$SOURCE" = "$DEV" ]; then
+              echo "ok"
+            else
+              case "$SOURCE" in
+                hotfix/*) echo "ok" ;;
+                *) echo "::error::Only $DEV and hotfix/* may open PRs to $MAIN (got '$SOURCE'). Use: shipit promote <bump>"; exit 1 ;;
+              esac
+            fi
+          fi
+
+  branch-name:
+    name: branch-name
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch naming
+        env:
+          SOURCE: ${{ github.head_ref }}
+          PATTERN: '^(feature|hotfix)/CU-[a-z0-9]+-[a-z0-9]+(-[a-z0-9]+)*$'
+          MAIN: main
+          DEV: dev
+        run: |
+          if [ "$SOURCE" = "$MAIN" ] || [ "$SOURCE" = "$DEV" ]; then
+            echo "skipping: $SOURCE is a long-lived branch"
+            exit 0
+          fi
+          if echo "$SOURCE" | grep -qE "$PATTERN"; then
+            echo "ok: $SOURCE"
+            exit 0
+          fi
+          echo "::error::Branch '$SOURCE' does not match $PATTERN. Create branches with: shipit feature <id> <desc>"
+          exit 1
+
+  staleness:
+    name: staleness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Warn when the branch is behind its target
+        env:
+          SOURCE: ${{ github.head_ref }}
+          TARGET: ${{ github.base_ref }}
+        run: |
+          BASE=$(git merge-base "origin/$SOURCE" "origin/$TARGET")
+          HEAD=$(git rev-parse "origin/$TARGET")
+          if [ "$BASE" != "$HEAD" ]; then
+            BEHIND=$(git rev-list --count "$BASE..$HEAD")
+            echo "::warning::'$SOURCE' is $BEHIND commit(s) behind '$TARGET'. Run: shipit sync"
+          else
+            echo "up to date with $TARGET"
+          fi

@@ -1,0 +1,3 @@
+#!/bin/sh
+# shipit hooks v1 - managed by shipit; do not edit. Regenerate with: shipit hooks
+exec "$(dirname "$0")/shipit-run" pre-commit "$@"

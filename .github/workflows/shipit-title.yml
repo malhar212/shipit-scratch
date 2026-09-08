@@ -1,0 +1,44 @@
+# shipit workflows v1 - managed by shipit. Regenerate with `shipit init`; manual edits are overwritten.
+name: shipit title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main, dev]
+
+jobs:
+  title:
+    name: title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          TARGET: ${{ github.base_ref }}
+          MAIN: main
+          DEV: dev
+          TYPES: 'feat|fix|docs|style|refactor|perf|test|chore|ci|build'
+          MAX: '100'
+        run: |
+          echo "Title: $TITLE"
+          if [ "$TARGET" = "$MAIN" ]; then
+            if echo "$TITLE" | grep -qE '^\[(major|minor|patch)\] .+'; then
+              echo "ok"
+              exit 0
+            fi
+            echo "::error::PR titles to $MAIN must start with [major], [minor] or [patch]; it selects the version bump. Use: shipit promote <bump>"
+            exit 1
+          fi
+          # PRs to $DEV are squash-merged, so the title becomes the commit message on $DEV.
+          if ! echo "$TITLE" | grep -qE "^($TYPES)(\([^)]+\))?!?: .+"; then
+            echo "::error::PR titles to $DEV must be conventional: type(scope): subject. Types: $TYPES. Example: feat(CU-abc123): add login form"
+            exit 1
+          fi
+          if [ "${#TITLE}" -gt "$MAX" ]; then
+            echo "::error::PR title is longer than $MAX characters"
+            exit 1
+          fi
+          case "$TITLE" in
+            *.) echo "::error::PR title must not end with a period"; exit 1 ;;
+          esac
+          echo "ok"

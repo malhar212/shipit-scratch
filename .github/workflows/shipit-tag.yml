@@ -1,0 +1,79 @@
+# shipit workflows v1 - managed by shipit. Regenerate with `shipit init`; manual edits are overwritten.
+name: shipit tag
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shipit-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: tag
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Compute the next version
+        id: version
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          DEV: dev
+        run: |
+          case "$HEAD_REF" in
+            "$DEV"|hotfix/*) ;;
+            *) echo "skip=true" >> "$GITHUB_OUTPUT"; echo "Not a release PR (head: $HEAD_REF); skipping"; exit 0 ;;
+          esac
+          BUMP=$(echo "$TITLE" | sed -nE 's/^\[(major|minor|patch)\].*/\1/p')
+          if [ -z "$BUMP" ]; then
+            echo "::error::PR title must start with [major], [minor] or [patch]: $TITLE"
+            exit 1
+          fi
+          LATEST=$(git tag -l 'v*' | sed -E 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n1)
+          [ -n "$LATEST" ] || LATEST=0.0.0
+          MA=$(echo "$LATEST" | cut -d. -f1); MI=$(echo "$LATEST" | cut -d. -f2); PA=$(echo "$LATEST" | cut -d. -f3)
+          case "$BUMP" in
+            major) MA=$((MA + 1)); MI=0; PA=0 ;;
+            minor) MI=$((MI + 1)); PA=0 ;;
+            patch) PA=$((PA + 1)) ;;
+          esac
+          TAG="v$MA.$MI.$PA"
+          echo "latest=v$LATEST bump=$BUMP next=$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create the tag and release
+        if: steps.version.outputs.skip != 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::warning::$TAG already exists; skipping"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TITLE" -m "PR #$PR_NUMBER $PR_URL"
+          git push origin "$TAG"
+          gh release create "$TAG" --title "$TAG" --notes "$TITLE (#$PR_NUMBER)" --generate-notes \
+            || echo "::warning::Could not create a GitHub release; the tag was pushed"
+
+      - name: Delete the hotfix branch
+        if: steps.version.outputs.skip != 'true' && startsWith(github.event.pull_request.head.ref, 'hotfix/')
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: git push origin --delete "$HEAD_REF" || echo "already deleted"

@@ -1,0 +1,93 @@
+# shipit workflows v1 - managed by shipit. Regenerate with `shipit init`; manual edits are overwritten.
+name: shipit backmerge
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: shipit-backmerge
+  cancel-in-progress: false
+
+jobs:
+  backmerge:
+    name: backmerge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge main into dev
+        id: merge
+        env:
+          MAIN: main
+          DEV: dev
+        run: |
+          git fetch origin
+          if ! git show-ref --verify --quiet "refs/remotes/origin/$DEV"; then
+            echo "$DEV does not exist; creating it from $MAIN"
+            git checkout -b "$DEV" "origin/$MAIN"
+            git push -u origin "$DEV"
+            echo "result=created" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git merge-base --is-ancestor "origin/$MAIN" "origin/$DEV"; then
+            echo "$DEV already contains everything on $MAIN; nothing to do"
+            echo "result=noop" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git checkout "$DEV"
+          if git merge "origin/$MAIN" --no-ff -m "chore: back-merge $MAIN into $DEV [shipit]"; then
+            git push origin "$DEV"
+            echo "result=merged" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "result=conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open an issue on conflict
+        if: steps.merge.outputs.result == 'conflict'
+        uses: actions/github-script@v7
+        env:
+          MAIN: main
+          DEV: dev
+        with:
+          script: |
+            const main = process.env.MAIN, dev = process.env.DEV;
+            const title = 'Back-merge conflict: ' + main + ' -> ' + dev;
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, state: 'open', labels: 'shipit-backmerge',
+            });
+            if (open.some((i) => i.title === title)) { core.info('An issue is already open'); return; }
+            const body = [
+              '## Automatic back-merge failed',
+              '',
+              'After a merge to "' + main + '", merging it into "' + dev + '" hit conflicts that need a human.',
+              '',
+              '### Fix it',
+              '~~~bash',
+              'shipit backmerge',
+              '~~~',
+              'Resolve the conflicted files when prompted; the command commits and pushes for you.',
+              '',
+              '_Opened by the shipit backmerge workflow._',
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner, repo: context.repo.repo, title, body, labels: ['shipit-backmerge', 'urgent'],
+            });
+
+      - name: Summary
+        env:
+          RESULT: ${{ steps.merge.outputs.result }}
+        run: |
+          echo "back-merge result: $RESULT"

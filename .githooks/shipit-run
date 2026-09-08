@@ -1,0 +1,18 @@
+#!/bin/sh
+# shipit hooks v1 - managed by shipit. Hook logic lives in the shipit CLI; this file only locates it.
+hook="$1"
+shift
+if [ -n "$SHIPIT_BIN" ]; then
+  exec "$SHIPIT_BIN" hook "$hook" "$@"
+fi
+root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if [ -x "$root/node_modules/.bin/shipit" ]; then
+  exec "$root/node_modules/.bin/shipit" hook "$hook" "$@"
+fi
+if command -v shipit >/dev/null 2>&1; then
+  exec shipit hook "$hook" "$@"
+fi
+echo "shipit: git hooks are configured but the shipit CLI was not found." >&2
+echo "        install it:   npm i -g @service1stfinancial/shipit   (or add it as a devDependency)" >&2
+echo "        bypass once:  git <command> --no-verify" >&2
+exit 1
